@@ -1,0 +1,21 @@
+德州扑克牌型胜率计算 - 执行结果记录
+
+=== 环境信息 ===
+- 操作系统: linux 6.12.8+
+- Shell: /usr/bin/bash
+- Python 版本:
+  命令: /usr/bin/python3 -V
+  输出: Python 3.13.3
+
+=== 执行命令 1 ===
+命令:
+/usr/bin/python3 /workspace/holdem_equity.py --player1-hands AKs,QQ --player2-hands AKo,JJ --trials-per-matchup 200 --output /workspace/equities_sample.txt --seed 123 --processes 1
+
+标准输出:
+已写入 4 行到 /workspace/equities_sample.txt
+
+=== 结果文件内容 (/workspace/equities_sample.txt) ===
+玩家1 | AKs | 0.527500 | 玩家2 | AKo | 0.472500
+玩家1 | AKs | 0.482500 | 玩家2 | JJ | 0.517500
+玩家1 | QQ | 0.617500 | 玩家2 | AKo | 0.382500
+玩家1 | QQ | 0.787500 | 玩家2 | JJ | 0.212500
