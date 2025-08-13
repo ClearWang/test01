@@ -2,18 +2,12 @@
 import os
 import random
 import time
-import itertools
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple
 
-try:
-    import eval7
-except ImportError as exc:
-    raise SystemExit("Missing dependency 'eval7'. Please install with: pip install eval7") from exc
-
-
+# Card universe and helpers (self-contained)
 RANKS_TYPE = "AKQJT98765432"  # for hand-type labels (high to low)
-RANKS_DECK = "23456789TJQKA"   # for building the deck (low to high ordering irrelevant)
-SUITS = "cdhs"
+RANKS_DECK = "23456789TJQKA"   # for building the deck
+SUITS = "cdhs"                 # clubs, diamonds, hearts, spades
 FULL_DECK_CODES = [f"{r}{s}" for r in RANKS_DECK for s in SUITS]
 RANK_CHAR_TO_VALUE = {
     '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
@@ -38,16 +32,21 @@ def _find_straight_top(ranks: List[int]) -> int:
 
 
 def _evaluate_7(cards: List[str]) -> Tuple[int, Tuple[int, ...]]:
+    """Evaluate 7-card hand strength.
+    Returns a tuple (category, tiebreakers) where higher is better.
+    Categories: 8 SF, 7 Quads, 6 Full House, 5 Flush, 4 Straight,
+                3 Trips, 2 Two Pair, 1 Pair, 0 High Card.
+    """
     ranks = [RANK_CHAR_TO_VALUE[c[0]] for c in cards]
     suits = [c[1] for c in cards]
 
-    counts: dict = {}
+    counts = {}
     for r in ranks:
         counts[r] = counts.get(r, 0) + 1
     unique_ranks_desc = sorted(set(ranks), reverse=True)
 
     # Flush and Straight Flush
-    suit_to_ranks: dict = {}
+    suit_to_ranks = {}
     for r, s in zip(ranks, suits):
         suit_to_ranks.setdefault(s, []).append(r)
     flush_suit = None
@@ -117,6 +116,7 @@ def _evaluate_7(cards: List[str]) -> Tuple[int, Tuple[int, ...]]:
 
 
 def generate_starting_hand_types() -> List[str]:
+    """169 hand classes: pairs + suited + offsuit (i<j)."""
     types: List[str] = []
     for i, r1 in enumerate(RANKS_TYPE):
         for j, r2 in enumerate(RANKS_TYPE):
@@ -163,7 +163,7 @@ def simulate_equity_for_pair(hand_type_1: str, hand_type_2: str, num_trials: int
 
     while trials_done < num_trials:
         success = False
-        for _ in range(32):  # few attempts to find non-overlapping suit instantiations
+        for _ in range(32):  # attempts to find non-overlapping suit instantiations
             available = set(FULL_DECK_CODES)
 
             pick1 = try_pick_hand(available, hand_type_1, rng)
@@ -197,7 +197,6 @@ def simulate_equity_for_pair(hand_type_1: str, hand_type_2: str, num_trials: int
             success = True
             break
         if not success:
-            # For safety break to avoid infinite loop on impossible combos
             break
 
     if trials_done == 0:
@@ -208,157 +207,38 @@ def simulate_equity_for_pair(hand_type_1: str, hand_type_2: str, num_trials: int
     return equity1, equity2, trials_done
 
 
-RANKS: str = "AKQJT98765432"
-SUITS: str = "shdc"  # spades, hearts, diamonds, clubs
-
-
-def generate_starting_hand_classes() -> List[str]:
-    """Generate the 169 preflop starting hand classes in standard notation.
-
-    Returns examples like: 'AA', 'AKs', 'AKo', 'KQs', 'KQo', ..., '32o'.
-    Order is rank-major with high-to-low ranks, pairs first, suited above offsuit.
-    """
-    classes: List[str] = []
-    for i, r1 in enumerate(RANKS):
-        for j, r2 in enumerate(RANKS):
-            if i > j:
-                # r1 higher than r2 -> make suited and offsuit variants
-                classes.append(f"{r1}{r2}s")
-                classes.append(f"{r1}{r2}o")
-            elif i == j:
-                # pair
-                classes.append(f"{r1}{r2}")
-            # if i < j -> skip because we already covered mirror at i>j
-    return classes
-
-
-def list_suit_combos_for_class(hand_class: str) -> List[Tuple[str, str]]:
-    """Enumerate all concrete two-card combos (as strings like 'As', 'Kd') for a class.
-
-    For pairs: r1 == r2, choose any 2 suits out of 4 -> C(4,2)=6 combos.
-    For suited: r1 != r2, both cards share the same suit -> 4 combos.
-    For offsuit: r1 != r2, the two cards have different suits -> 12 combos.
-
-    Returns a list of 2-tuples (card1, card2). Order is fixed by ranks in the class (first rank first).
-    """
-    if len(hand_class) == 2:  # pair like 'AA'
-        r = hand_class[0]
-        cards = [f"{r}{s}" for s in SUITS]
-        combos = []
-        for s1_idx in range(len(SUITS)):
-            for s2_idx in range(s1_idx + 1, len(SUITS)):
-                combos.append((cards[s1_idx], cards[s2_idx]))
-        return combos
-
-    r1, r2, typ = hand_class[0], hand_class[1], hand_class[2]
-    if typ == 's':
-        return [(f"{r1}{s}", f"{r2}{s}") for s in SUITS]
-    elif typ == 'o':
-        combos = []
-        for s1 in SUITS:
-            for s2 in SUITS:
-                if s1 == s2:
-                    continue
-                combos.append((f"{r1}{s1}", f"{r2}{s2}"))
-        return combos
-    else:
-        raise ValueError(f"Unexpected class type in {hand_class}")
-
-
-def card_objs(card_pair: Tuple[str, str]) -> Tuple[eval7.Card, eval7.Card]:
-    return eval7.Card(card_pair[0]), eval7.Card(card_pair[1])
-
-
-def deal_board_excluding(used_cards: List[eval7.Card]) -> List[eval7.Card]:
-    """Deal 5 random board cards excluding the used cards."""
-    used_set = set(used_cards)
-    # Precompute the full deck once per call-site would be faster, but this is acceptable for moderate sampling.
-    full_deck = [eval7.Card(f"{r}{s}") for r in RANKS for s in SUITS]
-    available = [c for c in full_deck if c not in used_set]
-    return random.sample(available, 5)
-
-
-def choose_non_overlapping_combos(combos_a: List[Tuple[str, str]], combos_b: List[Tuple[str, str]]) -> Tuple[Tuple[str, str], Tuple[str, str]]:
-    """Choose two concrete combos that do not share any card. Retry a limited number of times."""
-    # Simple randomized attempt. Given dense solution space, collisions are rare.
-    for _ in range(200):
-        ca = random.choice(combos_a)
-        cb = random.choice(combos_b)
-        if len(set(ca) & set(cb)) == 0:
-            return ca, cb
-    # Fallback to deterministic search (should almost never be hit)
-    set_b_list = [set(cb) for cb in combos_b]
-    for ca in combos_a:
-        s_ca = set(ca)
-        for cb, s_cb in zip(combos_b, set_b_list):
-            if s_ca.isdisjoint(s_cb):
-                return ca, cb
-    # If truly impossible (should not happen), raise
-    raise RuntimeError("Failed to find non-overlapping combos for classes")
-
-
-def simulate_matchup_equity(hand_class_a: str, hand_class_b: str, samples: int) -> Tuple[float, float]:
-    """Monte Carlo simulate equity for two starting hand classes.
-
-    Returns (equity_a, equity_b) where equities sum to approximately 1 (ties split).
-    """
-    combos_a = list_suit_combos_for_class(hand_class_a)
-    combos_b = list_suit_combos_for_class(hand_class_b)
-
-    wins_a = 0
-    wins_b = 0
-    ties = 0
-
-    for _ in range(samples):
-        ca, cb = choose_non_overlapping_combos(combos_a, combos_b)
-        a1, a2 = card_objs(ca)
-        b1, b2 = card_objs(cb)
-
-        board = deal_board_excluding([a1, a2, b1, b2])
-
-        score_a = eval7.evaluate([a1, a2] + board)
-        score_b = eval7.evaluate([b1, b2] + board)
-
-        if score_a > score_b:
-            wins_a += 1
-        elif score_b > score_a:
-            wins_b += 1
-        else:
-            ties += 1
-
-    total = wins_a + wins_b + ties
-    if total == 0:
-        return 0.5, 0.5
-
-    equity_a = (wins_a + 0.5 * ties) / total
-    equity_b = (wins_b + 0.5 * ties) / total
-    return equity_a, equity_b
-
-
 def format_percentage(x: float) -> str:
     return f"{x * 100:.2f}%"
 
 
 def main():
-    random.seed(42)
+    rng = random.Random(42)
 
-    # You can tune this for speed vs accuracy. 80~150 is a good balance for full 169x169 unique grid (i<=j).
-    SAMPLES_PER_MATCHUP = 100
+    # Tune for speed vs. accuracy; small default to finish promptly on full 169x169 grid
+    sims_per_pair_env = os.environ.get("SIMS_PER_PAIR", "10").strip()
+    try:
+        sims_per_pair = int(sims_per_pair_env)
+    except ValueError:
+        sims_per_pair = 10
 
-    classes = generate_starting_hand_classes()
+    output_file = "/workspace/两人德州扑克起手牌胜率.txt"
 
-    # We compute only unique matchups (i <= j) to avoid duplicates.
-    output_path = "/workspace/两人德州扑克起手牌胜率.txt"
+    hand_types = generate_starting_hand_types()
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        for i, a in enumerate(classes):
-            for j in range(i, len(classes)):
-                b = classes[j]
-                eq_a, eq_b = simulate_matchup_equity(a, b, SAMPLES_PER_MATCHUP)
-                line = f"{a} vs {b} | {format_percentage(eq_a)} {format_percentage(eq_b)}\n"
-                f.write(line)
+    start = time.time()
+    lines_written = 0
+    with open(output_file, "w", encoding="utf-8") as f:
+        for i, h1 in enumerate(hand_types):
+            for j in range(i, len(hand_types)):
+                h2 = hand_types[j]
+                eq1, eq2, trials = simulate_equity_for_pair(h1, h2, sims_per_pair, rng)
+                if trials == 0:
+                    continue
+                f.write(f"{h1} vs {h2} | {format_percentage(eq1)} {format_percentage(eq2)}\n")
+                lines_written += 1
 
-    print(f"结果已写入: {output_path}")
+    elapsed = time.time() - start
+    print(f"结果已写入: {output_file}（共 {lines_written} 行，用时 {elapsed:.1f}s，每对采样 {sims_per_pair} 次）")
 
 
 if __name__ == "__main__":
